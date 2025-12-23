@@ -1,27 +1,67 @@
-# Spanish Sentence Trainer (MVP)
+# LinguaBoost (Spanish Sentence Trainer)
 
-Full-stack MVP for a Spanish sentence translation trainer. Backend: Django + DRF + token auth + email verification/optional 2FA. Frontend: React (Vite). Uses Google Gemini (gemini-2.0-flash default) when `GOOGLE_API_KEY` is provided; otherwise falls back to deterministic offline behavior.
+Full-stack Spanish sentence translation trainer.
 
-## Quick start (backend)
-1) Create/activate venv (already at `.venv` if you use `python -m venv .venv`).
-2) Install deps:
-```
-C:/Users/User/OneDrive/Рабочий стол/spanishLearningSystemVSCODE/.venv/Scripts/python.exe -m pip install -r requirements.txt
-```
-3) Run migrations:
-```
-C:/Users/User/OneDrive/Рабочий стол/spanishLearningSystemVSCODE/.venv/Scripts/python.exe manage.py migrate
-```
-4) Start API:
-```
-C:/Users/User/OneDrive/Рабочий стол/spanishLearningSystemVSCODE/.venv/Scripts/python.exe manage.py runserver
+- Backend: Django + Django REST Framework (token auth) + email verification + optional email-based 2FA.
+- Frontend: React (Vite) with an `/api` proxy to the backend.
+- AI: Uses OpenAI when `OPENAI_API_KEY` is set; otherwise falls back to deterministic offline behavior.
+
+## Features
+
+- Dictionary (per-user words)
+- AI sentence generation (configurable level/topic/tense/sentence type)
+- Translation checking (with explanation)
+- Tutor chat
+- Progress + Statistics (accuracy, attempts, streaks)
+
+## Run with Docker (recommended)
+
+From the repo root:
+
+```bash
+docker-compose up --build
 ```
 
-### Auth & email
-- Registration requires email + password. A 6-digit code is emailed; verification activates the account and issues a token.
-- Login sends 2FA code only if enabled in profile (off by default).
-- Environment for SMTP (Gmail-friendly):
+Then open:
+
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:8000/api/
+
+## Run locally (without Docker)
+
+### Backend
+
+```bash
+python -m venv .venv
+.
+\.venv\Scripts\python.exe -m pip install -r requirements.txt
+\.venv\Scripts\python.exe manage.py migrate
+\.venv\Scripts\python.exe manage.py runserver
 ```
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The Vite dev server proxies `/api` to the backend.
+
+## Environment variables
+
+Create a local `.env` file (do NOT commit it).
+
+### OpenAI
+
+- `OPENAI_API_KEY` (optional)
+	- If missing/empty, the backend uses offline fallbacks for generation/checking.
+- `OPENAI_MODEL_NAME` (optional, default: `gpt-4o-mini`)
+
+### Email (verification codes + optional 2FA)
+
+```text
 EMAIL_HOST=smtp.gmail.com
 EMAIL_PORT=587
 EMAIL_USE_TLS=true
@@ -30,26 +70,36 @@ EMAIL_HOST_PASSWORD=your_app_password
 DEFAULT_FROM_EMAIL=you@example.com
 ```
 
-### API endpoints
-- `POST /api/words/` CRUD (ModelViewSet) for user words (demo user fallback).
-- `POST /api/generate/` body: `level`, `length`, `num_sentences (5-10)` → sentences + session info, enforces no >3 same word in a row; keeps last 10 words.
-- `POST /api/check/` body: `sentence`, `translation` → correctness + fixed translation + explanation.
-- Auth routes: `/api/auth/register/`, `/api/auth/verify-registration/`, `/api/auth/login/`, `/api/auth/verify-2fa/`, `/api/auth/me/`, `/api/auth/logout/`, `/api/auth/toggle-2fa/`.
+## UI: Statistics meaning
 
-## Quick start (frontend)
-```
-cd frontend
-npm install
-npm run dev
-```
-Vite dev server proxies `/api` → `http://127.0.0.1:8000`.
+The avatar dropdown (top-right) includes **Statistics**.
 
-## Environment
-- `GOOGLE_API_KEY` (required for live LLM). If absent, backend uses deterministic offline fallbacks.
-- `GENAI_MODEL_NAME` (default `gemini-2.0-flash`).
-- SMTP variables above for sending codes.
+- **Attempts**: counted when you submit a non-empty answer and press **Check**.
+- **Correct / Wrong**: how many attempts were marked correct/incorrect.
+- **Accuracy**: `Correct / Attempts`.
+- **Sessions / Days practiced / Streaks**: based on days you generated a session (generated sentences).
 
-## Notes
-- Per-user data: words/exercises tied to the authenticated user; token auth is used by the frontend.
-- Exercises are stored and linked to sessions; `last_words_used` tracks recent IDs to prevent >3 repeats and keeps a rolling 10 history.
-- Frontend enforces 5–10 sentences to match backend.
+## API endpoints (high-level)
+
+- Words:
+	- `GET /api/words/`
+	- `POST /api/words/`
+	- `PUT /api/words/{id}/`
+	- `DELETE /api/words/{id}/`
+- Trainer:
+	- `POST /api/generate/`
+	- `POST /api/check/`
+	- `POST /api/chat/`
+	- `GET /api/progress/`
+- Auth:
+	- `POST /api/auth/register/`
+	- `POST /api/auth/verify-registration/`
+	- `POST /api/auth/login/`
+	- `POST /api/auth/verify-2fa/`
+	- `POST /api/auth/toggle-2fa/`
+	- `GET /api/auth/me/`
+	- `POST /api/auth/logout/`
+
+## Security notes
+
+- Never commit `.env` or API keys. If a key was committed at any point, rotate it.
