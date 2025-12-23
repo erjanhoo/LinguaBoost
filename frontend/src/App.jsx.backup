@@ -1,0 +1,535 @@
+import { useEffect, useMemo, useState } from "react";
+import axios from "axios";
+
+const api = axios.create({ baseURL: "/api" });
+const levelOptions = ["A1", "A2", "B1", "B2"];
+const lengthOptions = [
+  { value: "короткая", label: "Короткие" },
+  { value: "средняя", label: "Средние" },
+  { value: "длинная", label: "Длинные" },
+];
+
+const setAuthHeader = (token) => {
+  if (token) {
+    api.defaults.headers.common.Authorization = `Token ${token}`;
+    localStorage.setItem("token", token);
+  } else {
+    delete api.defaults.headers.common.Authorization;
+    localStorage.removeItem("token");
+  }
+};
+
+export default function App() {
+  const [token, setToken] = useState(localStorage.getItem("token") || "");
+  const [user, setUser] = useState(null);
+  const [authError, setAuthError] = useState("");
+  const [info, setInfo] = useState("");
+
+  const [registerEmail, setRegisterEmail] = useState("");
+  const [registerPassword, setRegisterPassword] = useState("");
+  const [registerCode, setRegisterCode] = useState("");
+  const [needsRegCode, setNeedsRegCode] = useState(false);
+
+  const [loginEmail, setLoginEmail] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
+  const [loginCode, setLoginCode] = useState("");
+  const [needs2FA, setNeeds2FA] = useState(false);
+
+  const [words, setWords] = useState([]);
+  const [newWord, setNewWord] = useState("");
+  const [loadingWords, setLoadingWords] = useState(false);
+
+  const [level, setLevel] = useState("A1");
+  const [length, setLength] = useState("короткая");
+  const [numSentences, setNumSentences] = useState(5);
+  const [wordsCount, setWordsCount] = useState(5);
+  const [sentences, setSentences] = useState([]);
+  const [usedWords, setUsedWords] = useState([]);
+  const [sessionInfo, setSessionInfo] = useState(null);
+  const [translations, setTranslations] = useState({});
+  const [results, setResults] = useState({});
+  const [generating, setGenerating] = useState(false);
+  const [checkingIdx, setCheckingIdx] = useState(null);
+
+  useEffect(() => {
+    setAuthHeader(token);
+    if (token) {
+      fetchMe();
+    } else {
+      setUser(null);
+      setWords([]);
+    }
+  }, [token]);
+
+  const fetchMe = async () => {
+    try {
+      const res = await api.get("/auth/me/");
+      setUser(res.data);
+      setAuthError("");
+      loadWords();
+    } catch (err) {
+      setUser(null);
+      setAuthError("Требуется вход.");
+    }
+  };
+
+  const loadWords = async () => {
+    setLoadingWords(true);
+    try {
+      const res = await api.get("/words/");
+      setWords(res.data);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingWords(false);
+    }
+  };
+
+  const register = async () => {
+    setAuthError("");
+    setInfo("");
+    try {
+      await api.post("/auth/register/", { email: registerEmail, password: registerPassword });
+      setNeedsRegCode(true);
+      setInfo("Код отправлен на почту");
+    } catch (err) {
+      setAuthError(err.response?.data?.detail || "Не удалось зарегистрировать");
+    }
+  };
+
+  const verifyRegistration = async () => {
+    setAuthError("");
+    try {
+      const res = await api.post("/auth/verify-registration/", { email: registerEmail, code: registerCode });
+      setToken(res.data.token);
+      setUser(res.data.user);
+      setNeedsRegCode(false);
+      setInfo("Регистрация завершена");
+    } catch (err) {
+      setAuthError(err.response?.data?.detail || "Код не принят");
+    }
+  };
+
+  const loginUser = async () => {
+    setAuthError("");
+    setNeeds2FA(false);
+    try {
+      const res = await api.post("/auth/login/", { email: loginEmail, password: loginPassword });
+      if (res.data.requires_2fa) {
+        setNeeds2FA(true);
+        setInfo("2FA код отправлен");
+      } else {
+        setToken(res.data.token);
+        setUser(res.data.user);
+        setInfo("Вход выполнен");
+      }
+    } catch (err) {
+      setAuthError(err.response?.data?.detail || "Не удалось войти");
+    }
+  };
+
+  const verify2FA = async () => {
+    setAuthError("");
+    try {
+      const res = await api.post("/auth/verify-2fa/", { email: loginEmail, code: loginCode });
+      setToken(res.data.token);
+      setUser(res.data.user);
+      setNeeds2FA(false);
+      setInfo("2FA подтверждена");
+    } catch (err) {
+      setAuthError(err.response?.data?.detail || "Код неверен");
+    }
+  };
+
+  const logoutUser = async () => {
+    try {
+      await api.post("/auth/logout/");
+    } catch (err) {
+      // ignore
+    }
+    setToken("");
+    setUser(null);
+    setWords([]);
+  };
+
+  const toggle2FA = async () => {
+    try {
+      const enabled = !user?.profile?.two_factor_enabled;
+      const res = await api.post("/auth/toggle-2fa/", { enabled });
+      setUser((prev) => ({ ...prev, profile: { ...prev.profile, two_factor_enabled: res.data.two_factor_enabled } }));
+    } catch (err) {
+      setAuthError("Не удалось переключить 2FA");
+    }
+  };
+
+  const addWord = async () => {
+    if (!newWord.trim()) return;
+    const exists = words.some((w) => w.text.trim().toLowerCase() === newWord.trim().toLowerCase());
+    if (exists) {
+      setInfo("Слово уже есть в словаре");
+      return;
+    }
+    const payload = { text: newWord.trim() };
+    try {
+      const res = await api.post("/words/", payload);
+      setWords((prev) => [...prev, res.data]);
+      setNewWord("");
+      setInfo("Добавлено");
+    } catch (err) {
+      setAuthError(err.response?.data?.text || err.response?.data?.detail || "Не удалось добавить слово");
+    }
+  };
+
+  const removeWord = async (id) => {
+    await api.delete(`/words/${id}/`);
+    setWords((prev) => prev.filter((w) => w.id !== id));
+  };
+
+  const updateWord = async (id, text) => {
+    const res = await api.put(`/words/${id}/`, { text });
+    setWords((prev) => prev.map((w) => (w.id === id ? res.data : w)));
+  };
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    setResults({});
+    setTranslations({});
+    try {
+      const res = await api.post("/generate/", {
+        level,
+        length,
+        num_sentences: numSentences,
+        words_count: wordsCount,
+      });
+      setSentences(res.data.sentences || []);
+      setUsedWords(res.data.words_used || []);
+      setSessionInfo(res.data.session || null);
+      if (res.data.used_genai === false) {
+        setInfo("Работаю в офлайн-режиме (без AI ключа)");
+      } else {
+        setInfo("Сгенерировано через AI");
+      }
+    } catch (err) {
+      setAuthError(err.response?.data?.detail || "Не удалось сгенерировать");
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const handleCheck = async (sentence, idx) => {
+    const translation = translations[idx] || "";
+    if (!translation.trim()) return;
+    setCheckingIdx(idx);
+    try {
+      const res = await api.post("/check/", {
+        sentence,
+        translation,
+      });
+      setResults((prev) => ({ ...prev, [idx]: res.data }));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setCheckingIdx(null);
+    }
+  };
+
+  const generatedList = useMemo(
+    () =>
+      sentences.map((sentence, idx) => ({
+        idx,
+        sentence,
+        translation: translations[idx] || "",
+        result: results[idx],
+      })),
+    [sentences, translations, results]
+  );
+
+  const authenticated = Boolean(user && token);
+
+  return (
+    <div className="app-shell">
+      <header className="header">
+        <div>
+          <div className="badge">MVP</div>
+          <div className="title">Spanish Sentence Trainer</div>
+        </div>
+        <div className="chip">Auth + DRF + React</div>
+      </header>
+
+      <div className="card" style={{ marginBottom: 16 }}>
+        <h3>Аутентификация</h3>
+        {authError && <div style={{ color: "#dc2626", marginBottom: 8 }}>{authError}</div>}
+        {info && <div style={{ color: "#15803d", marginBottom: 8 }}>{info}</div>}
+        <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
+          <div className="stack">
+            <strong>Регистрация</strong>
+            <input className="input" placeholder="email" value={registerEmail} onChange={(e) => setRegisterEmail(e.target.value)} />
+            <input
+              className="input"
+              placeholder="пароль"
+              type="password"
+              value={registerPassword}
+              onChange={(e) => setRegisterPassword(e.target.value)}
+            />
+            {needsRegCode && (
+              <input
+                className="input"
+                placeholder="6-значный код"
+                value={registerCode}
+                onChange={(e) => setRegisterCode(e.target.value)}
+              />
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="button" onClick={register} disabled={!registerEmail || !registerPassword}>
+                Отправить код
+              </button>
+              {needsRegCode && (
+                <button className="button secondary" onClick={verifyRegistration} disabled={!registerCode.trim()}>
+                  Подтвердить
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="stack">
+            <strong>Вход</strong>
+            <input className="input" placeholder="email" value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} />
+            <input
+              className="input"
+              placeholder="пароль"
+              type="password"
+              value={loginPassword}
+              onChange={(e) => setLoginPassword(e.target.value)}
+            />
+            {needs2FA && (
+              <input
+                className="input"
+                placeholder="2FA код"
+                value={loginCode}
+                onChange={(e) => setLoginCode(e.target.value)}
+              />
+            )}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="button" onClick={loginUser} disabled={!loginEmail || !loginPassword}>
+                Войти
+              </button>
+              {needs2FA && (
+                <button className="button secondary" onClick={verify2FA} disabled={!loginCode.trim()}>
+                  Подтвердить 2FA
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="stack">
+            <strong>Статус</strong>
+            {authenticated ? (
+              <>
+                <div>Вы вошли как {user.email}</div>
+                <div>Почта подтверждена: {user.profile?.is_email_verified ? "да" : "нет"}</div>
+                <div>
+                  2FA: {user.profile?.two_factor_enabled ? "включена" : "выключена"}</div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button className="button secondary" onClick={toggle2FA}>
+                    {user.profile?.two_factor_enabled ? "Выключить 2FA" : "Включить 2FA"}
+                  </button>
+                  <button className="button secondary" onClick={logoutUser}>
+                    Выйти
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div>Войдите или зарегистрируйтесь, чтобы сохранять слова.</div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid">
+        <div className="card">
+          <h3>Словарь</h3>
+          {!authenticated && <div style={{ color: "#dc2626", marginBottom: 8 }}>Доступно после входа.</div>}
+          {authenticated && (
+            <div className="stack">
+              <label className="label" htmlFor="newWord">
+                Добавить слово или фразу
+              </label>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  id="newWord"
+                  className="input"
+                  placeholder="например, desayuno"
+                  value={newWord}
+                  onChange={(e) => setNewWord(e.target.value)}
+                />
+                <button className="button" onClick={addWord} disabled={!newWord.trim()}>
+                  Добавить
+                </button>
+              </div>
+              <div className="list">
+                {loadingWords && <span>Загрузка слов...</span>}
+                {!loadingWords &&
+                  words.map((word) => (
+                    <WordChip key={word.id} word={word} onDelete={removeWord} onUpdate={updateWord} />
+                  ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="card">
+          <h3>Настройки генерации</h3>
+          {!authenticated && <div style={{ color: "#dc2626", marginBottom: 8 }}>Доступно после входа.</div>}
+          <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
+            <Field label="Уровень">
+              <select className="select" value={level} onChange={(e) => setLevel(e.target.value)} disabled={!authenticated}>
+                {levelOptions.map((lvl) => (
+                  <option key={lvl}>{lvl}</option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Длина предложения">
+              <select className="select" value={length} onChange={(e) => setLength(e.target.value)} disabled={!authenticated}>
+                {lengthOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Количество предложений">
+              <input
+                className="input"
+                type="number"
+                min={5}
+                max={10}
+                value={numSentences}
+                onChange={(e) => setNumSentences(Number(e.target.value))}
+                disabled={!authenticated}
+              />
+            </Field>
+            <Field label="Сколько слов учесть">
+              <input
+                className="input"
+                type="number"
+                min={1}
+                max={20}
+                value={wordsCount}
+                onChange={(e) => setWordsCount(Number(e.target.value))}
+                disabled={!authenticated}
+              />
+            </Field>
+          </div>
+          <button className="button" style={{ marginTop: 12 }} onClick={handleGenerate} disabled={!authenticated || generating}>
+            {generating ? "Генерация..." : "Сгенерировать"}
+          </button>
+          {usedWords.length > 0 && (
+            <div className="list">
+              {usedWords.map((w, idx) => (
+                <span key={`${w}-${idx}`} className="chip">
+                  {w}
+                </span>
+              ))}
+            </div>
+          )}
+          {sessionInfo && (
+            <div style={{ marginTop: 8, fontSize: 12, color: "#4a5568" }}>
+              Сессия #{sessionInfo.id} · послед. слова: {sessionInfo.last_words_used.join(", ")}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 18 }}>
+        <h3>Тренировка перевода</h3>
+        {!authenticated && <p style={{ color: "#dc2626" }}>Войдите, чтобы тренироваться.</p>}
+        {authenticated && (
+          <div className="stack">
+            {generatedList.length === 0 && <p>Сгенерируйте предложения, чтобы начать тренировку.</p>}
+            {generatedList.map(({ sentence, translation, result, idx }) => (
+              <div key={idx} className="sentence-item">
+                <strong>{sentence}</strong>
+                <textarea
+                  className="textarea"
+                  rows={2}
+                  placeholder="Ваш перевод"
+                  value={translation}
+                  onChange={(e) =>
+                    setTranslations((prev) => ({
+                      ...prev,
+                      [idx]: e.target.value,
+                    }))
+                  }
+                />
+                <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+                  <button
+                    className="button secondary"
+                    onClick={() => handleCheck(sentence, idx)}
+                    disabled={!translation.trim() || checkingIdx === idx}
+                  >
+                    {checkingIdx === idx ? "Проверяем..." : "Проверить"}
+                  </button>
+                  {result && (
+                    <span className="status" style={{ color: result.is_correct ? "#16a34a" : "#dc2626" }}>
+                      {result.is_correct ? "Правильно" : "Есть ошибки"}
+                    </span>
+                  )}
+                </div>
+                {result && (
+                  <div style={{ marginTop: 6, fontSize: 14 }}>
+                    <div>
+                      Эталон: <em>{result.correct_translation}</em>
+                    </div>
+                    {result.explanation && <div>Пояснение: {result.explanation}</div>}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children }) {
+  return (
+    <label className="label" style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <span>{label}</span>
+      {children}
+    </label>
+  );
+}
+
+function WordChip({ word, onDelete, onUpdate }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(word.text);
+
+  const save = async () => {
+    if (!value.trim()) return;
+    await onUpdate(word.id, value.trim());
+    setEditing(false);
+  };
+
+  return (
+    <div className="chip" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+      {editing ? (
+        <input
+          className="input"
+          style={{ width: 140 }}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onBlur={save}
+        />
+      ) : (
+        <span>{word.text}</span>
+      )}
+      <button className="button secondary" style={{ padding: "4px 8px", fontSize: 12 }} onClick={() => setEditing((v) => !v)}>
+        {editing ? "OK" : "Ред."}
+      </button>
+      <button className="button secondary" style={{ padding: "4px 8px", fontSize: 12 }} onClick={() => onDelete(word.id)}>
+        ×
+      </button>
+    </div>
+  );
+}
