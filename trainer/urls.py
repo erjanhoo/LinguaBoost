@@ -8,6 +8,8 @@ from .views import (
     LoginView,
     LogoutView,
     MeView,
+    PasswordResetConfirmView,
+    PasswordResetRequestView,
     ProgressView,
     RegisterView,
     Toggle2FAView,
@@ -32,4 +34,6 @@ urlpatterns = [
     path("auth/logout/", LogoutView.as_view(), name="logout"),
     path("auth/me/", MeView.as_view(), name="me"),
     path("auth/toggle-2fa/", Toggle2FAView.as_view(), name="toggle-2fa"),
+    path("auth/password-reset/request/", PasswordResetRequestView.as_view(), name="password-reset-request"),
+    path("auth/password-reset/confirm/", PasswordResetConfirmView.as_view(), name="password-reset-confirm"),
 ]

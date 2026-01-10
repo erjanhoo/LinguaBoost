@@ -8,6 +8,9 @@ class Profile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
     is_email_verified = models.BooleanField(default=False)
     two_factor_enabled = models.BooleanField(default=False)
+    profile_picture = models.ImageField(upload_to="profile_pics/", blank=True, null=True)
+    native_language = models.CharField(max_length=50, default="English")
+    target_language = models.CharField(max_length=50, default="Spanish")
 
     def __str__(self) -> str:  # pragma: no cover
         return f"Profile for {self.user}" 
@@ -16,10 +19,12 @@ class Profile(models.Model):
 class VerificationCode(models.Model):
     PURPOSE_REGISTRATION = "registration"
     PURPOSE_LOGIN_2FA = "login_2fa"
+    PURPOSE_PASSWORD_RESET = "password_reset"
 
     PURPOSE_CHOICES = [
         (PURPOSE_REGISTRATION, "Registration"),
         (PURPOSE_LOGIN_2FA, "Login 2FA"),
+        (PURPOSE_PASSWORD_RESET, "Password Reset"),
     ]
 
     user = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -39,13 +44,14 @@ class VerificationCode(models.Model):
 class Word(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
     text = models.CharField(max_length=200)
+    language = models.CharField(max_length=50, default="Spanish")
 
     def __str__(self) -> str:  # pragma: no cover - simple repr
         return self.text
 
     class Meta:
         constraints = [
-            models.UniqueConstraint(fields=["user", "text"], name="unique_word_per_user"),
+            models.UniqueConstraint(fields=["user", "text", "language"], name="unique_word_per_user"),
         ]
 
 

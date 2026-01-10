@@ -4,6 +4,7 @@ import os
 import random
 import re
 import unicodedata
+import uuid
 from datetime import timedelta
 from typing import List, Tuple
 
@@ -11,6 +12,7 @@ from django.contrib.auth import authenticate, get_user_model, login, logout
 from django.core.mail import send_mail
 from django.db import transaction
 from django.db.models import Q
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from openai import OpenAI
 from rest_framework import permissions, status, viewsets
@@ -60,6 +62,8 @@ def _send_code_email(user: User, code: str, purpose: str) -> None:
     subject = """Ваш код подтверждения"""
     if purpose == VerificationCode.PURPOSE_REGISTRATION:
         body = f"Код для завершения регистрации: {code}. Срок действия 10 минут."
+    elif purpose == VerificationCode.PURPOSE_PASSWORD_RESET:
+        body = f"Код для сброса пароля: {code}. Срок действия 10 минут."
     else:
         body = f"Код для входа (2FA): {code}. Срок действия 10 минут."
     send_mail(subject, body, settings.DEFAULT_FROM_EMAIL, [user.email], fail_silently=False)
@@ -138,8 +142,8 @@ def _compute_longest_streak(dates_asc: List[timezone.datetime.date]) -> int:
     return max(best, current)
 
 
-def _select_words(user: User, session: Session, target_count: int) -> Tuple[List[Word], Session]:
-    words = list(Word.objects.filter(user=user))
+def _select_words(user: User, session: Session, target_count: int, language: str = "Spanish") -> Tuple[List[Word], Session]:
+    words = list(Word.objects.filter(user=user, language=language))
     if not words:
         return [], session
 
@@ -199,24 +203,20 @@ def generate_sentences_with_genai(
     level: str, 
     length: str, 
     num_sentences: int,
+    source_language: str,
+    target_language: str,
     topic: str = "any",
     sentence_type: str = "mixed",
     tense: str = "mixed",
     grammar_focus: str = "",
-    language_direction: str = "es-to-en"
 ) -> List[str]:
     api_key = settings.OPENAI_API_KEY
     
     if not api_key:
         return [f"Example sentence with {word}" for word in user_words[:num_sentences]]
     
-    # Determine source and target languages
-    if language_direction == "en-to-es":
-        source_lang = "English"
-        target_lang = "Spanish"
-    else:  # es-to-en (default)
-        source_lang = "Spanish"
-        target_lang = "English"
+    source_lang = source_language
+    target_lang = target_language
     
     # Build topic instruction
     topic_instruction = ""
@@ -434,13 +434,16 @@ class GenerateView(APIView):
 
     def post(self, request):
         user = request.user
+        profile = getattr(user, "profile", None)
+        target_lang = profile.target_language if profile else "Spanish"
+        native_lang = profile.native_language if profile else "English"
+
         level = request.data.get("level", "A1")
         length = request.data.get("length", "короткая")
         topic = request.data.get("topic", "any")
         sentence_type = request.data.get("sentence_type", "mixed")
         tense = request.data.get("tense", "mixed")
         grammar_focus = request.data.get("grammar_focus", "")
-        language_direction = request.data.get("language_direction", "es-to-en")
         num_sentences = int(request.data.get("num_sentences", 5))
         num_sentences = max(5, min(num_sentences, 10))
         words_count_raw = request.data.get("words_count", 5)
@@ -458,20 +461,20 @@ class GenerateView(APIView):
         session = _ensure_session(user)
         
         if specific_words:
-            # If specific words are requested, try to find them in user's dictionary
-            selected_words = list(Word.objects.filter(user=user, text__in=specific_words))
-            # If we found fewer words than requested (e.g. typos), we just use what we found
-            # We don't update session.last_words_used for manual selection to avoid messing up the rotation algorithm
+            selected_words = list(Word.objects.filter(user=user, text__in=specific_words, language__iexact=target_lang))
         else:
-            selected_words, session = _select_words(user, session, target_count=words_count)
+            selected_words, session = _select_words(user, session, target_count=words_count, language=target_lang)
 
         if selected_words:
             user_words = [w.text for w in selected_words]
         else:
-            base_words = list(DEFAULT_BASE_WORDS)
-            while len(base_words) < words_count:
-                base_words.extend(DEFAULT_BASE_WORDS)
-            user_words = base_words[:words_count]
+            if target_lang.lower() == "spanish":
+                base_words = list(DEFAULT_BASE_WORDS)
+                while len(base_words) < words_count:
+                    base_words.extend(DEFAULT_BASE_WORDS)
+                user_words = base_words[:words_count]
+            else:
+                user_words = []
 
         try:
             sentences = generate_sentences_with_genai(
@@ -479,11 +482,12 @@ class GenerateView(APIView):
                 level,
                 length,
                 num_sentences,
-                topic,
-                sentence_type,
-                tense,
-                grammar_focus,
-                language_direction,
+                source_language=target_lang,
+                target_language=native_lang,
+                topic=topic,
+                sentence_type=sentence_type,
+                tense=tense,
+                grammar_focus=grammar_focus,
             )
         except Exception as exc:  # pragma: no cover - runtime safeguard
             message = str(exc)
@@ -703,6 +707,25 @@ class MeView(APIView):
     def get(self, request):
         return Response(UserSerializer(request.user).data, status=status.HTTP_200_OK)
 
+    def patch(self, request):
+        user = request.user
+        profile = getattr(user, "profile", None)
+        if not profile:
+             return Response({"detail": "Profile not found"}, status=500)
+
+        # Handle profile picture
+        if "profile_picture" in request.FILES:
+            profile.profile_picture = request.FILES["profile_picture"]
+            
+        if "native_language" in request.data:
+            profile.native_language = request.data["native_language"]
+            
+        if "target_language" in request.data:
+            profile.target_language = request.data["target_language"]
+            
+        profile.save()
+        return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
+
 
 class Toggle2FAView(APIView):
     def post(self, request):
@@ -810,3 +833,49 @@ class ChatView(APIView):
                 {"detail": "Failed to get response from AI."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+class PasswordResetRequestView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = request.data.get("email", "").strip()
+        user = User.objects.filter(email=email).first()
+        if user:
+            code_obj = _create_code(user, VerificationCode.PURPOSE_PASSWORD_RESET)
+            _send_code_email(user, code_obj.code, VerificationCode.PURPOSE_PASSWORD_RESET)
+        
+        return Response({"detail": "If verification matches, email sent."}, status=status.HTTP_200_OK)
+
+
+class PasswordResetConfirmView(APIView):
+    permission_classes = [permissions.AllowAny]
+
+    def post(self, request):
+        email = request.data.get("email", "").strip()
+        code = request.data.get("code", "").strip()
+        new_password = request.data.get("new_password", "").strip()
+
+        if not email or not code or not new_password:
+             return Response({"detail": "All fields required"}, status=status.HTTP_400_BAD_REQUEST)
+
+        user = get_object_or_404(User, email=email)
+        
+        valid_code = VerificationCode.objects.filter(
+            user=user,
+            purpose=VerificationCode.PURPOSE_PASSWORD_RESET,
+            code=code,
+            is_used=False,
+            expires_at__gt=timezone.now()
+        ).first()
+
+        if not valid_code:
+             return Response({"detail": "Invalid or expired code"}, status=status.HTTP_400_BAD_REQUEST)
+
+        user.set_password(new_password)
+        user.save()
+        
+        valid_code.is_used = True
+        valid_code.save()
+
+        return Response({"detail": "Password reset successfully"}, status=status.HTTP_200_OK)
+

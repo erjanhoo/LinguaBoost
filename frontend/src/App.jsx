@@ -3,6 +3,7 @@ import axios from "axios";
 import Login from "./components/Login";
 import Signup from "./components/Signup";
 import VerifyCode from "./components/VerifyCode";
+import ProfileSettings from "./components/ProfileSettings";
 
 const api = axios.create({ baseURL: "/api" });
 const levelOptions = ["A1", "A2", "B1", "B2"];
@@ -617,6 +618,16 @@ export default function App() {
     return <Signup onSignup={register} onSwitchToLogin={() => setAuthPage("login")} error={authError} />;
   }
 
+  if (authPage === "profile") {
+    return (
+      <ProfileSettings
+        user={user}
+        onClose={() => setAuthPage(null)}
+        onUpdate={fetchMe}
+      />
+    );
+  }
+
   return (
     <div className="app-shell">
       <header className={`header ${headerVisible ? 'visible' : 'hidden'}`}>
@@ -659,6 +670,14 @@ export default function App() {
                       {user?.profile?.two_factor_enabled && <span className="badge-mini">2FA</span>}
                     </div>
                   </div>
+                  <div className="profile-dropdown-divider"></div>
+                  <button className="profile-dropdown-item" onClick={() => { setShowProfileDropdown(false); setAuthPage("profile"); }}>
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <circle cx="12" cy="12" r="3"></circle>
+                      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                    Profile Settings
+                  </button>
                   <div className="profile-dropdown-divider"></div>
                   <button className="profile-dropdown-item" onClick={toggle2FA}>
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
