@@ -622,6 +622,8 @@ export default function App() {
     return (
       <ProfileSettings
         user={user}
+        progress={progress}
+        onLogout={logoutUser}
         onClose={() => setAuthPage(null)}
         onUpdate={fetchMe}
       />

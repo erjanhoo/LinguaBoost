@@ -705,7 +705,7 @@ class LogoutView(APIView):
 
 class MeView(APIView):
     def get(self, request):
-        return Response(UserSerializer(request.user).data, status=status.HTTP_200_OK)
+        return Response(UserSerializer(request.user, context={"request": request}).data, status=status.HTTP_200_OK)
 
     def patch(self, request):
         user = request.user
@@ -722,9 +722,17 @@ class MeView(APIView):
             
         if "target_language" in request.data:
             profile.target_language = request.data["target_language"]
+
+        # Handle new fields
+        if "bio" in request.data:
+            profile.bio = request.data["bio"]
+        
+        if "learning_goal" in request.data:
+            profile.learning_goal = request.data["learning_goal"]
             
         profile.save()
-        return Response(UserSerializer(user).data, status=status.HTTP_200_OK)
+        return Response(UserSerializer(user, context={"request": request}).data, status=status.HTTP_200_OK)
+
 
 
 class Toggle2FAView(APIView):
@@ -734,6 +742,28 @@ class Toggle2FAView(APIView):
         profile.two_factor_enabled = enabled
         profile.save(update_fields=["two_factor_enabled"])
         return Response({"two_factor_enabled": enabled}, status=status.HTTP_200_OK)
+
+
+class ChangePasswordView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        user = request.user
+        old_password = request.data.get("old_password")
+        new_password = request.data.get("new_password")
+        
+        if not old_password or not new_password:
+             return Response({"detail": "Both fields are required."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if not user.check_password(old_password):
+            return Response({"detail": "Incorrect old password."}, status=status.HTTP_400_BAD_REQUEST)
+        
+        user.set_password(new_password)
+        user.save()
+        # Keep user logged in
+        login(request, user)
+        return Response({"detail": "Password updated successfully."}, status=status.HTTP_200_OK)
+
 
 
 class ProgressView(APIView):

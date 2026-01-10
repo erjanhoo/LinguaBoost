@@ -11,6 +11,8 @@ class Profile(models.Model):
     profile_picture = models.ImageField(upload_to="profile_pics/", blank=True, null=True)
     native_language = models.CharField(max_length=50, default="English")
     target_language = models.CharField(max_length=50, default="Spanish")
+    bio = models.TextField(blank=True, max_length=500)
+    learning_goal = models.CharField(max_length=100, blank=True, default="Fluency")
 
     def __str__(self) -> str:  # pragma: no cover
         return f"Profile for {self.user}" 

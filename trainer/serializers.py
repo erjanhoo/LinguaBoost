@@ -9,7 +9,8 @@ User = get_user_model()
 class ProfileSerializer(serializers.ModelSerializer):
     class Meta:
         model = Profile
-        fields = ["is_email_verified", "two_factor_enabled", "profile_picture", "native_language", "target_language"]
+        fields = ["is_email_verified", "two_factor_enabled", "profile_picture", "native_language", "target_language", "bio", "learning_goal"]
+
 
 
 
